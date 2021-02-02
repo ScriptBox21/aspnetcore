@@ -110,7 +110,7 @@ try {
         else {
             $varName = $dep.Name -replace '\.',''
             $varName = $varName -replace '\-',''
-            $varName = "${varName}PackageVersion"
+            $varName = "${varName}Version"
 
             $versionVar = $versionProps.SelectSingleNode("//PropertyGroup[`@Label=`"Automated`"]/$varName")
             $actualVersion = $versionVar.InnerText
@@ -131,7 +131,7 @@ try {
 
     foreach ($unexpectedVar in $versionVars) {
         LogError `
-            "Version variable '$unexpectedVar' does not have a matching entry in Version.Details.xml. See https://github.com/dotnet/aspnetcore/blob/master/docs/ReferenceResolution.md for instructions on how to add a new dependency." `
+            "Version variable '$unexpectedVar' does not have a matching entry in Version.Details.xml. See https://github.com/dotnet/aspnetcore/blob/main/docs/ReferenceResolution.md for instructions on how to add a new dependency." `
             -filepath "$repoRoot\eng\Versions.props"
     }
 
