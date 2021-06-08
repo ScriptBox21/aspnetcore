@@ -49,6 +49,9 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Https.Internal
         private readonly HttpsOptionsCallback? _httpsOptionsCallback;
         private readonly object? _httpsOptionsCallbackState;
 
+        // Pool for cancellation tokens that cancel the handshake
+        private readonly CancellationTokenSourcePool _ctsPool = new();
+
         public HttpsConnectionMiddleware(ConnectionDelegate next, HttpsConnectionAdapterOptions options)
           : this(next, options, loggerFactory: NullLoggerFactory.Instance)
         {
@@ -133,26 +136,27 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Https.Internal
 
         public async Task OnConnectionAsync(ConnectionContext context)
         {
-            await Task.Yield();
-
             if (context.Features.Get<ITlsConnectionFeature>() != null)
             {
                 await _next(context);
                 return;
             }
 
-            var feature = new Core.Internal.TlsConnectionFeature();
-            context.Features.Set<ITlsConnectionFeature>(feature);
-            context.Features.Set<ITlsHandshakeFeature>(feature);
-
             var sslDuplexPipe = CreateSslDuplexPipe(
                 context.Transport,
                 context.Features.Get<IMemoryPoolFeature>()?.MemoryPool ?? MemoryPool<byte>.Shared);
             var sslStream = sslDuplexPipe.Stream;
 
+            var feature = new Core.Internal.TlsConnectionFeature(sslStream);
+            context.Features.Set<ITlsConnectionFeature>(feature);
+            context.Features.Set<ITlsHandshakeFeature>(feature);
+            context.Features.Set<ITlsApplicationProtocolFeature>(feature);
+
             try
             {
-                using var cancellationTokenSource = new CancellationTokenSource(_handshakeTimeout);
+                using var cancellationTokenSource = _ctsPool.Rent();
+                cancellationTokenSource.CancelAfter(_handshakeTimeout);
+
                 if (_httpsOptionsCallback is null)
                 {
                     await DoOptionsBasedHandshakeAsync(context, sslStream, feature, cancellationTokenSource.Token);
@@ -192,17 +196,6 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Https.Internal
                 return;
             }
 
-            feature.ApplicationProtocol = sslStream.NegotiatedApplicationProtocol.Protocol;
-            context.Features.Set<ITlsApplicationProtocolFeature>(feature);
-
-            feature.ClientCertificate = ConvertToX509Certificate2(sslStream.RemoteCertificate);
-            feature.CipherAlgorithm = sslStream.CipherAlgorithm;
-            feature.CipherStrength = sslStream.CipherStrength;
-            feature.HashAlgorithm = sslStream.HashAlgorithm;
-            feature.HashStrength = sslStream.HashStrength;
-            feature.KeyExchangeAlgorithm = sslStream.KeyExchangeAlgorithm;
-            feature.KeyExchangeStrength = sslStream.KeyExchangeStrength;
-            feature.Protocol = sslStream.SslProtocol;
 
             KestrelEventSource.Log.TlsHandshakeStop(context, feature);
 
@@ -411,7 +404,8 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Https.Internal
                 pool: memoryPool,
                 bufferSize: memoryPool.GetMinimumSegmentSize(),
                 minimumReadSize: memoryPool.GetMinimumAllocSize(),
-                leaveOpen: true
+                leaveOpen: true,
+                useZeroByteReads: true
             );
 
             var outputPipeOptions = new StreamPipeWriterOptions

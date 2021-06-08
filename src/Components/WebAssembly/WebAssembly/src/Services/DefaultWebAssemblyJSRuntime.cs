@@ -1,7 +1,10 @@
 // Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Text.Json;
+using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using Microsoft.JSInterop.Infrastructure;
 using Microsoft.JSInterop.WebAssembly;
 
@@ -9,29 +12,42 @@ namespace Microsoft.AspNetCore.Components.WebAssembly.Services
 {
     internal sealed class DefaultWebAssemblyJSRuntime : WebAssemblyJSRuntime
     {
-        internal static readonly DefaultWebAssemblyJSRuntime Instance = new DefaultWebAssemblyJSRuntime();
+        internal static readonly DefaultWebAssemblyJSRuntime Instance = new();
 
         public ElementReferenceContext ElementReferenceContext { get; }
 
+        [DynamicDependency(nameof(InvokeDotNet))]
+        [DynamicDependency(nameof(EndInvokeJS))]
+        [DynamicDependency(nameof(BeginInvokeDotNet))]
+        [DynamicDependency(nameof(NotifyByteArrayAvailable))]
         private DefaultWebAssemblyJSRuntime()
         {
             ElementReferenceContext = new WebElementReferenceContext(this);
             JsonSerializerOptions.Converters.Add(new ElementReferenceJsonConverter(ElementReferenceContext));
         }
 
-        #pragma warning disable IDE0051 // Remove unused private members. Invoked via Mono's JS interop mechanism (invoke_method)
-        private static string? InvokeDotNet(string assemblyName, string methodIdentifier, string dotNetObjectId, string argsJson)
+        public JsonSerializerOptions ReadJsonSerializerOptions() => JsonSerializerOptions;
+
+        // The following methods are invoke via Mono's JS interop mechanism (invoke_method)
+        public static string? InvokeDotNet(string assemblyName, string methodIdentifier, string dotNetObjectId, string argsJson)
         {
             var callInfo = new DotNetInvocationInfo(assemblyName, methodIdentifier, dotNetObjectId == null ? default : long.Parse(dotNetObjectId, CultureInfo.InvariantCulture), callId: null);
             return DotNetDispatcher.Invoke(Instance, callInfo, argsJson);
         }
 
         // Invoked via Mono's JS interop mechanism (invoke_method)
-        private static void EndInvokeJS(string argsJson)
-            => DotNetDispatcher.EndInvokeJS(Instance, argsJson);
+        public static void EndInvokeJS(string argsJson)
+        {
+            WebAssemblyCallQueue.Schedule(argsJson, static argsJson =>
+            {
+                // This is not expected to throw, as it takes care of converting any unhandled user code
+                // exceptions into a failure on the Task that was returned when calling InvokeAsync.
+                DotNetDispatcher.EndInvokeJS(Instance, argsJson);
+            });
+        }
 
         // Invoked via Mono's JS interop mechanism (invoke_method)
-        private static void BeginInvokeDotNet(string callId, string assemblyNameOrDotNetObjectId, string methodIdentifier, string argsJson)
+        public static void BeginInvokeDotNet(string callId, string assemblyNameOrDotNetObjectId, string methodIdentifier, string argsJson)
         {
             // Figure out whether 'assemblyNameOrDotNetObjectId' is the assembly name or the instance ID
             // We only need one for any given call. This helps to work around the limitation that we can
@@ -50,8 +66,28 @@ namespace Microsoft.AspNetCore.Components.WebAssembly.Services
             }
 
             var callInfo = new DotNetInvocationInfo(assemblyName, methodIdentifier, dotNetObjectId, callId);
-            DotNetDispatcher.BeginInvokeDotNet(Instance, callInfo, argsJson);
+            WebAssemblyCallQueue.Schedule((callInfo, argsJson), static state =>
+            {
+                // This is not expected to throw, as it takes care of converting any unhandled user code
+                // exceptions into a failure on the JS Promise object.
+                DotNetDispatcher.BeginInvokeDotNet(Instance, state.callInfo, state.argsJson);
+            });
         }
-        #pragma warning restore IDE0051
+
+        /// <summary>
+        /// Invoked via Mono's JS interop mechanism (invoke_method)
+        ///
+        /// Notifies .NET of an array that's available for transfer from JS to .NET
+        ///
+        /// Ideally that byte array would be transferred directly as a parameter on this
+        /// call, however that's not currently possible due to: https://github.com/dotnet/runtime/issues/53378
+        /// </summary>
+        /// <param name="id">Id of the byte array</param>
+        public static void NotifyByteArrayAvailable(int id)
+        {
+            var data = Instance.InvokeUnmarshalled<byte[]>("Blazor._internal.retrieveByteArray");
+
+            DotNetDispatcher.ReceiveByteArray(Instance, id, data);
+        }
     }
 }

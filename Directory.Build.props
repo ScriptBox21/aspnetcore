@@ -2,9 +2,17 @@
   <Import Project="eng\Common.props" />
 
   <PropertyGroup>
-    <RepoRoot>$(MSBuildThisFileDirectory)</RepoRoot>
+    <!-- $(RepoRoot) is normally set globally and Arcade overrides it to ensure a trailing slash. -->
+    <RepoRoot Condition=" '$(RepoRoot)' == '' OR !HasTrailingSlash('$(RepoRoot)') ">$(MSBuildThisFileDirectory)</RepoRoot>
+
     <RepositoryUrl>https://github.com/dotnet/aspnetcore</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <AnalysisMode>Default</AnalysisMode>
   </PropertyGroup>
 
   <!-- Defines project type conventions. -->
@@ -14,13 +22,14 @@
     <IsBenchmarkProject Condition=" $(MSBuildProjectName.EndsWith('.Performance')) OR
         $(RepoRelativeProjectDir.Contains('perf')) OR
         $(RepoRelativeProjectDir.Contains('benchmarkapps')) ">true</IsBenchmarkProject>
+    <IsMicrobenchmarksProject Condition=" $(MSBuildProjectName.EndsWith('.Microbenchmarks')) ">true</IsMicrobenchmarksProject>
     <IsSpecificationTestProject Condition="$(MSBuildProjectName.EndsWith('.Specification.Tests'))">true</IsSpecificationTestProject>
     <IsUnitTestProject Condition=" '$(IsUnitTestProject)' == '' ">false</IsUnitTestProject>
     <IsUnitTestProject Condition=" '$(IsSpecificationTestProject)' != 'true' AND
         ( $(MSBuildProjectName.EndsWith('Tests')) OR
           $(MSBuildProjectName.EndsWith('.Test')) OR
           $(MSBuildProjectName.EndsWith('.FunctionalTest')) ) ">true</IsUnitTestProject>
-    <IsTestAssetProject Condition=" $(RepoRelativeProjectDir.Contains('testassets')) ">true</IsTestAssetProject>
+    <IsTestAssetProject Condition=" $(RepoRelativeProjectDir.Contains('testassets')) OR $(MSBuildProjectName.Contains('TestCommon'))">true</IsTestAssetProject>
     <IsSampleProject Condition=" $(RepoRelativeProjectDir.ToUpperInvariant().Contains('SAMPLE')) ">true</IsSampleProject>
     <IsAnalyzersProject Condition="$(MSBuildProjectName.EndsWith('.Analyzers'))">true</IsAnalyzersProject>
     <IsShipping Condition=" '$(IsSampleProject)' == 'true' OR
@@ -162,7 +171,8 @@
       linux-musl-arm64;
       linux-x64;
       linux-arm;
-      linux-arm64
+      linux-arm64;
+      freebsd-x64
     </SupportedRuntimeIdentifiers>
 
     <!-- Make error messages clickable in VS Code's console -->

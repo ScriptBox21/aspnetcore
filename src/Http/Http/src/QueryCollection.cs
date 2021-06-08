@@ -18,13 +18,11 @@ namespace Microsoft.AspNetCore.Http
         /// </summary>
         public static readonly QueryCollection Empty = new QueryCollection();
         private static readonly string[] EmptyKeys = Array.Empty<string>();
-        private static readonly StringValues[] EmptyValues = Array.Empty<StringValues>();
-        private static readonly Enumerator EmptyEnumerator = new Enumerator();
         // Pre-box
-        private static readonly IEnumerator<KeyValuePair<string, StringValues>> EmptyIEnumeratorType = EmptyEnumerator;
-        private static readonly IEnumerator EmptyIEnumerator = EmptyEnumerator;
+        private static readonly IEnumerator<KeyValuePair<string, StringValues>> EmptyIEnumeratorType = default(Enumerator);
+        private static readonly IEnumerator EmptyIEnumerator = default(Enumerator);
 
-        private Dictionary<string, StringValues>? Store { get; set; }
+        private Dictionary<string, StringValues>? Store { get; }
 
         /// <summary>
         /// Initializes a new instance of <see cref="QueryCollection"/>.
@@ -152,7 +150,7 @@ namespace Microsoft.AspNetCore.Http
             if (Store == null || Store.Count == 0)
             {
                 // Non-boxed Enumerator
-                return EmptyEnumerator;
+                return default;
             }
             return new Enumerator(Store.GetEnumerator());
         }

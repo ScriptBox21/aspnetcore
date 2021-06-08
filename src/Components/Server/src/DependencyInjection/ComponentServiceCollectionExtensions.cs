@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Components.Server;
 using Microsoft.AspNetCore.Components.Server.BlazorPack;
 using Microsoft.AspNetCore.Components.Server.Circuits;
 using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage;
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.SignalR.Protocol;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
@@ -59,12 +60,14 @@ namespace Microsoft.Extensions.DependencyInjection
             // user's configuration. So even if the user has multiple independent server-side
             // Components entrypoints, this lot is the same and repeated registrations are a no-op.
             services.TryAddEnumerable(ServiceDescriptor.Singleton<IPostConfigureOptions<StaticFileOptions>, ConfigureStaticFilesOptions>());
-            services.TryAddSingleton<CircuitFactory>();
-            services.TryAddSingleton<ServerComponentDeserializer>();
+            services.TryAddSingleton<ICircuitFactory, CircuitFactory>();
+            services.TryAddSingleton<IServerComponentDeserializer, ServerComponentDeserializer>();
+            services.TryAddSingleton<ICircuitHandleRegistry, CircuitHandleRegistry>();
             services.TryAddSingleton<RootComponentTypeCache>();
             services.TryAddSingleton<ComponentParameterDeserializer>();
             services.TryAddSingleton<ComponentParametersTypeCache>();
             services.TryAddSingleton<CircuitIdFactory>();
+            services.TryAddScoped<IErrorBoundaryLogger, RemoteErrorBoundaryLogger>();
 
             services.TryAddScoped(s => s.GetRequiredService<ICircuitAccessor>().Circuit);
             services.TryAddScoped<ICircuitAccessor, DefaultCircuitAccessor>();

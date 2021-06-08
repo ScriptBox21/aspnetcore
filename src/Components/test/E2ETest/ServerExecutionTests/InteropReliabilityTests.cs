@@ -214,7 +214,6 @@ namespace Microsoft.AspNetCore.Components.E2ETest.ServerExecutionTests
         }
 
         [Fact]
-        [QuarantinedTest("https://github.com/dotnet/aspnetcore/issues/19410")]
         public async Task ContinuesWorkingAfterInvalidAsyncReturnCallback()
         {
             // Arrange
@@ -440,7 +439,7 @@ namespace Microsoft.AspNetCore.Components.E2ETest.ServerExecutionTests
             {
                 BrowserRendererId = 0,
                 EventHandlerId = 6,
-                EventArgsType = "mouse",
+                EventName = "click",
             };
 
             await Client.ExpectCircuitError(async () =>
@@ -478,7 +477,7 @@ namespace Microsoft.AspNetCore.Components.E2ETest.ServerExecutionTests
             {
                 BrowserRendererId = 0,
                 EventHandlerId = 1,
-                EventArgsType = "mouse",
+                EventName = "click",
             };
 
             await Client.ExpectCircuitError(async () =>

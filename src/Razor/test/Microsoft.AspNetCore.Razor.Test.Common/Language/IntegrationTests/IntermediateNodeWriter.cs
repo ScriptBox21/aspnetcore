@@ -186,7 +186,7 @@ namespace Microsoft.AspNetCore.Razor.Language.IntegrationTests
 
         void IExtensionIntermediateNodeVisitor<RouteAttributeExtensionNode>.VisitExtension(RouteAttributeExtensionNode node)
         {
-            WriteContentNode(node, node.Template);
+            WriteContentNode(node, node.Template.Value);
         }
 
         public override void VisitExtension(ExtensionIntermediateNode node)
@@ -277,7 +277,7 @@ namespace Microsoft.AspNetCore.Razor.Language.IntegrationTests
         protected void WriteName(IntermediateNode node)
         {
             var typeName = node.GetType().Name;
-            if (typeName.EndsWith("IntermediateNode"))
+            if (typeName.EndsWith("IntermediateNode", StringComparison.Ordinal))
             {
                 _writer.Write(typeName.Substring(0, typeName.Length - "IntermediateNode".Length));
             }

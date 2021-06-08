@@ -113,7 +113,7 @@ namespace Microsoft.AspNetCore.Diagnostics.EntityFrameworkCore
                         var contextType = _localDiagnostic.Value!.ContextType;
                         var details = await httpContext.GetContextDetailsAsync(contextType!, _logger);
 
-                        if (details != null && (details.PendingModelChanges || details.PendingMigrations.Count() > 0))
+                        if (details != null && (details.PendingModelChanges || details.PendingMigrations.Any()))
                         {
                             var page = new DatabaseErrorPage
                             {
@@ -183,7 +183,7 @@ namespace Microsoft.AspNetCore.Diagnostics.EntityFrameworkCore
 
                 case DbContextErrorEventData contextErrorEventData:
                     {
-                        _localDiagnostic.Value?.Hold(contextErrorEventData.Exception, contextErrorEventData.Context.GetType());
+                        _localDiagnostic.Value?.Hold(contextErrorEventData.Exception, contextErrorEventData.Context!.GetType());
 
                         break;
                     }

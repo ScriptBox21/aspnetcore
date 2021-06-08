@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Web;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
 using Microsoft.Net.Http.Headers;
@@ -16,7 +17,8 @@ namespace Microsoft.AspNetCore.Hosting
     {
         private static readonly double TimestampToTicks = TimeSpan.TicksPerSecond / (double)Stopwatch.Frequency;
 
-        private const string ActivityName = "Microsoft.AspNetCore.Hosting.HttpRequestIn";
+        // internal so it can be used in tests
+        internal const string ActivityName = "Microsoft.AspNetCore.Hosting.HttpRequestIn";
         private const string ActivityStartKey = ActivityName + ".Start";
         private const string ActivityStopKey = ActivityName + ".Stop";
 
@@ -24,13 +26,15 @@ namespace Microsoft.AspNetCore.Hosting
         private const string DeprecatedDiagnosticsEndRequestKey = "Microsoft.AspNetCore.Hosting.EndRequest";
         private const string DiagnosticsUnhandledExceptionKey = "Microsoft.AspNetCore.Hosting.UnhandledException";
 
+        private readonly ActivitySource _activitySource;
         private readonly DiagnosticListener _diagnosticListener;
         private readonly ILogger _logger;
 
-        public HostingApplicationDiagnostics(ILogger logger, DiagnosticListener diagnosticListener)
+        public HostingApplicationDiagnostics(ILogger logger, DiagnosticListener diagnosticListener, ActivitySource activitySource)
         {
             _logger = logger;
             _diagnosticListener = diagnosticListener;
+            _activitySource = activitySource;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -46,12 +50,26 @@ namespace Microsoft.AspNetCore.Hosting
             }
 
             var diagnosticListenerEnabled = _diagnosticListener.IsEnabled();
+            var diagnosticListenerActivityCreationEnabled = (diagnosticListenerEnabled && _diagnosticListener.IsEnabled(ActivityName, httpContext));
             var loggingEnabled = _logger.IsEnabled(LogLevel.Critical);
 
-            if (loggingEnabled || (diagnosticListenerEnabled && _diagnosticListener.IsEnabled(ActivityName, httpContext)))
+
+            if (loggingEnabled || diagnosticListenerActivityCreationEnabled || _activitySource.HasListeners())
             {
-                context.Activity = StartActivity(httpContext, out var hasDiagnosticListener);
+                context.Activity = StartActivity(httpContext, loggingEnabled, diagnosticListenerActivityCreationEnabled, out var hasDiagnosticListener);
                 context.HasDiagnosticListener = hasDiagnosticListener;
+
+                if (context.Activity is Activity activity)
+                {
+                    if (httpContext.Features.Get<IHttpActivityFeature>() is IHttpActivityFeature feature)
+                    {
+                        feature.Activity = activity;
+                    }
+                    else
+                    {
+                        httpContext.Features.Set(context.HttpActivityFeature);
+                    }
+                }
             }
 
             if (diagnosticListenerEnabled)
@@ -133,7 +151,7 @@ namespace Microsoft.AspNetCore.Hosting
 
             var activity = context.Activity;
             // Always stop activity if it was started
-            if (activity != null)
+            if (activity is not null)
             {
                 StopActivity(httpContext, activity, context.HasDiagnosticListener);
             }
@@ -245,21 +263,32 @@ namespace Microsoft.AspNetCore.Hosting
         }
 
         [MethodImpl(MethodImplOptions.NoInlining)]
-        private Activity StartActivity(HttpContext httpContext, out bool hasDiagnosticListener)
+        private Activity? StartActivity(HttpContext httpContext, bool loggingEnabled, bool diagnosticListenerActivityCreationEnabled, out bool hasDiagnosticListener)
         {
-            var activity = new Activity(ActivityName);
+            var activity = _activitySource.CreateActivity(ActivityName, ActivityKind.Server);
+            if (activity is null && (loggingEnabled || diagnosticListenerActivityCreationEnabled))
+            {
+                activity = new Activity(ActivityName);
+            }
             hasDiagnosticListener = false;
 
-            var headers = httpContext.Request.Headers;
-            if (!headers.TryGetValue(HeaderNames.TraceParent, out var requestId))
+            if (activity is null)
             {
-                headers.TryGetValue(HeaderNames.RequestId, out requestId);
+                return null;
+            }
+
+            var headers = httpContext.Request.Headers;
+            var requestId = headers.TraceParent;
+            if (requestId.Count == 0)
+            {
+                requestId = headers.RequestId;
             }
 
             if (!StringValues.IsNullOrEmpty(requestId))
             {
                 activity.SetParentId(requestId);
-                if (headers.TryGetValue(HeaderNames.TraceState, out var traceState))
+                var traceState = headers.TraceState;
+                if (traceState.Count > 0)
                 {
                     activity.TraceStateString = traceState;
                 }

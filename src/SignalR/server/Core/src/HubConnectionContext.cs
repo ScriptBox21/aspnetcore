@@ -48,9 +48,10 @@ namespace Microsoft.AspNetCore.SignalR
         private volatile bool _allowReconnect = true;
         private int _streamBufferCapacity;
         private long? _maxMessageSize;
-        private bool _receivedMessageTimeoutEnabled = false;
-        private long _receivedMessageElapsedTicks = 0;
+        private bool _receivedMessageTimeoutEnabled;
+        private long _receivedMessageElapsedTicks;
         private long _receivedMessageTimestamp;
+        private ClaimsPrincipal? _user;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="HubConnectionContext"/> class.
@@ -98,6 +99,7 @@ namespace Microsoft.AspNetCore.SignalR
         }
 
         internal HubCallerContext HubCallerContext { get; }
+        internal HubCallerClients HubCallerClients { get; set; } = null!;
 
         internal Exception? CloseException { get; private set; }
 
@@ -116,7 +118,17 @@ namespace Microsoft.AspNetCore.SignalR
         /// <summary>
         /// Gets the user for this connection.
         /// </summary>
-        public virtual ClaimsPrincipal? User => Features.Get<IConnectionUserFeature>()?.User;
+        public virtual ClaimsPrincipal User
+        {
+            get
+            {
+                if (_user is null)
+                {
+                    _user = Features.Get<IConnectionUserFeature>()?.User ?? new ClaimsPrincipal();
+                }
+                return _user;
+            }
+        }
 
         /// <summary>
         /// Gets the collection of features available on this connection.
@@ -614,7 +626,7 @@ namespace Microsoft.AspNetCore.SignalR
                 // If the transport channel is full, this will fail, but that's OK because
                 // adding a Ping message when the transport is full is unnecessary since the
                 // transport is still in the process of sending frames.
-                _ = TryWritePingAsync();
+                _ = TryWritePingAsync().Preserve();
 
                 // We only update the timestamp here, because updating on each sent message is bad for performance
                 // There can be a lot of sent messages per 15 seconds

@@ -329,7 +329,7 @@ namespace Microsoft.Net.Http.Headers
         public void AppendToStringBuilder(StringBuilder builder)
         {
             builder.Append(_name.AsSpan());
-            builder.Append("=");
+            builder.Append('=');
             builder.Append(_value.AsSpan());
 
             if (Expires.HasValue)
@@ -388,7 +388,7 @@ namespace Microsoft.Net.Http.Headers
             builder.Append(name.AsSpan());
             if (value != null)
             {
-                builder.Append("=");
+                builder.Append('=');
                 builder.Append(value.AsSpan());
             }
         }
@@ -494,7 +494,7 @@ namespace Microsoft.Net.Http.Headers
 
             // value or "quoted value"
             // The value may be empty
-            result._value = CookieHeaderValue.GetCookieValue(input, ref offset);
+            result._value = CookieHeaderParserShared.GetCookieValue(input, ref offset);
 
             // *(';' SP cookie-av)
             while (offset < input.Length)

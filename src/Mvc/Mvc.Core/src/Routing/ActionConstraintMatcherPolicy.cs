@@ -1,7 +1,6 @@
 // Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
-#nullable enable
 
 using System;
 using System.Collections.Generic;
@@ -19,8 +18,6 @@ namespace Microsoft.AspNetCore.Mvc.Routing
     // used with Matcher.
     internal class ActionConstraintMatcherPolicy : MatcherPolicy, IEndpointSelectorPolicy
     {
-        private static readonly IReadOnlyList<Endpoint> EmptyEndpoints = Array.Empty<Endpoint>();
-
         // We need to be able to run IActionConstraints on Endpoints that aren't associated
         // with an action. This is a sentinel value we use when the endpoint isn't from MVC.
         internal static readonly ActionDescriptor NonAction = new ActionDescriptor();
@@ -146,7 +143,7 @@ namespace Microsoft.AspNetCore.Mvc.Routing
                     var endpoint = candidate.Endpoint;
                     var actionDescriptor = endpoint.Metadata.GetMetadata<ActionDescriptor>();
 
-                    IReadOnlyList<IActionConstraint> constraints = Array.Empty<IActionConstraint>();
+                    IReadOnlyList<IActionConstraint>? constraints = Array.Empty<IActionConstraint>();
                     if (actionDescriptor != null)
                     {
                         constraints = _actionConstraintCache.GetActionConstraints(httpContext, actionDescriptor);

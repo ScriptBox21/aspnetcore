@@ -174,7 +174,7 @@ namespace Microsoft.AspNetCore.Http.Headers
         {
             get
             {
-                if (Uri.TryCreate(Headers[HeaderNames.Location], UriKind.RelativeOrAbsolute, out var uri))
+                if (Uri.TryCreate(Headers.Location, UriKind.RelativeOrAbsolute, out var uri))
                 {
                     return uri;
                 }
@@ -193,7 +193,7 @@ namespace Microsoft.AspNetCore.Http.Headers
         {
             get
             {
-                return Headers.GetList<SetCookieHeaderValue>(HeaderNames.SetCookie);
+                return Headers.SetCookie.GetList<SetCookieHeaderValue>();
             }
             set
             {
