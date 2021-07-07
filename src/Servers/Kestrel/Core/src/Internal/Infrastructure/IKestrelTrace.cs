@@ -4,6 +4,7 @@
 using System;
 using System.Net.Http;
 using System.Net.Http.HPack;
+using System.Net.Http.QPack;
 using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http2;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http3;
@@ -69,9 +70,9 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Infrastructure
 
         void Http2StreamResetAbort(string traceIdentifier, Http2ErrorCode error, ConnectionAbortedException abortReason);
 
-        void HPackDecodingError(string connectionId, int streamId, HPackDecodingException ex);
+        void HPackDecodingError(string connectionId, int streamId, Exception ex);
 
-        void HPackEncodingError(string connectionId, int streamId, HPackEncodingException ex);
+        void HPackEncodingError(string connectionId, int streamId, Exception ex);
 
         void Http2FrameReceived(string connectionId, Http2Frame frame);
 
@@ -92,5 +93,11 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Infrastructure
         void Http3FrameReceived(string connectionId, long streamId, Http3RawFrame frame);
 
         void Http3FrameSending(string connectionId, long streamId, Http3RawFrame frame);
+
+        void QPackDecodingError(string connectionId, long streamId, Exception ex);
+
+        void QPackEncodingError(string connectionId, long streamId, Exception ex);
+
+        void Http3OutboundControlStreamError(string connectionId, Exception ex);
     }
 }

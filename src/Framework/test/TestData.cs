@@ -55,6 +55,7 @@ namespace Microsoft.AspNetCore
                 "Microsoft.AspNetCore.Http.Connections.Common",
                 "Microsoft.AspNetCore.Http.Extensions",
                 "Microsoft.AspNetCore.Http.Features",
+                "Microsoft.AspNetCore.Http.Results",
                 "Microsoft.AspNetCore.HttpLogging",
                 "Microsoft.AspNetCore.HttpOverrides",
                 "Microsoft.AspNetCore.HttpsPolicy",
@@ -188,6 +189,7 @@ namespace Microsoft.AspNetCore
                 { "Microsoft.AspNetCore.Http.Connections.Common", "6.0.0.0" },
                 { "Microsoft.AspNetCore.Http.Extensions", "6.0.0.0" },
                 { "Microsoft.AspNetCore.Http.Features", "6.0.0.0" },
+                { "Microsoft.AspNetCore.Http.Results", "6.0.0.0" },
                 { "Microsoft.AspNetCore.HttpLogging", "6.0.0.0" },
                 { "Microsoft.AspNetCore.HttpOverrides", "6.0.0.0" },
                 { "Microsoft.AspNetCore.HttpsPolicy", "6.0.0.0" },
@@ -278,7 +280,6 @@ namespace Microsoft.AspNetCore
                 { "Microsoft.Net.Http.Headers", "6.0.0.0" },
                 { "System.Diagnostics.EventLog", "6.0.0.0" },
                 { "System.IO.Pipelines", "6.0.0.0" },
-                { "System.Security.Cryptography.Cng", "6.0.0.0" },
                 { "System.Security.Cryptography.Xml", "6.0.0.0" },
             };
 

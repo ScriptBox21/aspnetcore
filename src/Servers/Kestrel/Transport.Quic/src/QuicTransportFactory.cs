@@ -19,8 +19,8 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Quic
     /// </summary>
     internal class QuicTransportFactory : IMultiplexedConnectionListenerFactory
     {
-        private QuicTrace _log;
-        private QuicTransportOptions _options;
+        private readonly QuicTrace _log;
+        private readonly QuicTransportOptions _options;
 
         public QuicTransportFactory(ILoggerFactory loggerFactory, IOptions<QuicTransportOptions> options)
         {
@@ -34,7 +34,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Quic
                 throw new ArgumentNullException(nameof(loggerFactory));
             }
 
-            var logger = loggerFactory.CreateLogger("Microsoft.AspNetCore.Server.Kestrel.Transport.MsQuic");
+            var logger = loggerFactory.CreateLogger("Microsoft.AspNetCore.Server.Kestrel.Transport.Quic");
             _log = new QuicTrace(logger);
             _options = options.Value;
         }
@@ -56,7 +56,8 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Quic
             }
             if (sslServerAuthenticationOptions.ServerCertificate == null)
             {
-                throw new InvalidOperationException("SslServerAuthenticationOptions.ServerCertificate must be configured with a value.");
+                var message = $"{nameof(SslServerAuthenticationOptions)}.{nameof(SslServerAuthenticationOptions.ServerCertificate)} must be configured with a value.";
+                throw new InvalidOperationException(message);
             }
 
             var transport = new QuicConnectionListener(_options, _log, endpoint, sslServerAuthenticationOptions);

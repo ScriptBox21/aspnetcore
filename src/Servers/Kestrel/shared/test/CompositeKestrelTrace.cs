@@ -4,6 +4,7 @@
 using System;
 using System.Net.Http;
 using System.Net.Http.HPack;
+using System.Net.Http.QPack;
 using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Internal;
@@ -191,13 +192,13 @@ namespace Microsoft.AspNetCore.Testing
             _trace2.Http2StreamError(connectionId, ex);
         }
 
-        public void HPackDecodingError(string connectionId, int streamId, HPackDecodingException ex)
+        public void HPackDecodingError(string connectionId, int streamId, Exception ex)
         {
             _trace1.HPackDecodingError(connectionId, streamId, ex);
             _trace2.HPackDecodingError(connectionId, streamId, ex);
         }
 
-        public void HPackEncodingError(string connectionId, int streamId, HPackEncodingException ex)
+        public void HPackEncodingError(string connectionId, int streamId, Exception ex)
         {
             _trace1.HPackEncodingError(connectionId, streamId, ex);
             _trace2.HPackEncodingError(connectionId, streamId, ex);
@@ -279,6 +280,24 @@ namespace Microsoft.AspNetCore.Testing
         {
             _trace1.Http3FrameSending(connectionId, streamId, frame);
             _trace2.Http3FrameSending(connectionId, streamId, frame);
+        }
+
+        public void QPackDecodingError(string connectionId, long streamId, Exception ex)
+        {
+            _trace1.QPackDecodingError(connectionId, streamId, ex);
+            _trace2.QPackDecodingError(connectionId, streamId, ex);
+        }
+
+        public void QPackEncodingError(string connectionId, long streamId, Exception ex)
+        {
+            _trace1.QPackEncodingError(connectionId, streamId, ex);
+            _trace2.QPackEncodingError(connectionId, streamId, ex);
+        }
+
+        public void Http3OutboundControlStreamError(string connectionId, Exception ex)
+        {
+            _trace1.Http3OutboundControlStreamError(connectionId, ex);
+            _trace2.Http3OutboundControlStreamError(connectionId, ex);
         }
     }
 }

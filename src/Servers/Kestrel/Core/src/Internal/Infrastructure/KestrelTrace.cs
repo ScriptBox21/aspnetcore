@@ -4,6 +4,7 @@
 using System;
 using System.Net.Http;
 using System.Net.Http.HPack;
+using System.Net.Http.QPack;
 using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http2;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http3;
@@ -150,6 +151,18 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Infrastructure
             LoggerMessage.Define<string, string, long, long>(LogLevel.Trace, new EventId(47, "Http3FrameSending"),
                 @"Connection id ""{ConnectionId}"" sending {type} frame for stream ID {id} with length {length}.",
                 skipEnabledCheck: true);
+
+        private static readonly Action<ILogger, string, long, Exception> _qpackDecodingError =
+            LoggerMessage.Define<string, long>(LogLevel.Debug, new EventId(48, "QPackDecodingError"),
+                @"Connection id ""{ConnectionId}"": QPACK decoding error while decoding headers for stream ID {StreamId}.");
+
+        private static readonly Action<ILogger, string, long, Exception> _qpackEncodingError =
+            LoggerMessage.Define<string, long>(LogLevel.Information, new EventId(49, "QPackEncodingError"),
+                @"Connection id ""{ConnectionId}"": QPACK encoding error while encoding headers for stream ID {StreamId}.");
+
+        private static readonly Action<ILogger, string, Exception> _http3OutboundControlStreamError =
+            LoggerMessage.Define<string>(LogLevel.Debug, new EventId(50, "Http3OutboundControlStreamError"),
+                @"Connection id ""{ConnectionId}"": Unexpected error when initializing outbound control stream.");
 
         protected readonly ILogger _generalLogger;
         protected readonly ILogger _badRequestsLogger;
@@ -307,12 +320,12 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Infrastructure
             _http2StreamResetAbort(_http2Logger, traceIdentifier, error, abortReason);
         }
 
-        public virtual void HPackDecodingError(string connectionId, int streamId, HPackDecodingException ex)
+        public virtual void HPackDecodingError(string connectionId, int streamId, Exception ex)
         {
             _hpackDecodingError(_http2Logger, connectionId, streamId, ex);
         }
 
-        public virtual void HPackEncodingError(string connectionId, int streamId, HPackEncodingException ex)
+        public virtual void HPackEncodingError(string connectionId, int streamId, Exception ex)
         {
             _hpackEncodingError(_http2Logger, connectionId, streamId, ex);
         }
@@ -380,6 +393,21 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Infrastructure
             {
                 _http3FrameSending(_http3Logger, connectionId, Http3Formatting.ToFormattedType(frame.Type), streamId, frame.Length, null);
             }
+        }
+
+        public virtual void QPackDecodingError(string connectionId, long streamId, Exception ex)
+        {
+            _qpackDecodingError(_http3Logger, connectionId, streamId, ex);
+        }
+
+        public virtual void QPackEncodingError(string connectionId, long streamId, Exception ex)
+        {
+            _qpackEncodingError(_http3Logger, connectionId, streamId, ex);
+        }
+
+        public void Http3OutboundControlStreamError(string connectionId, Exception ex)
+        {
+            _http3OutboundControlStreamError(_http3Logger, connectionId, ex);
         }
 
         public virtual void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)

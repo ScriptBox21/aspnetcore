@@ -2,13 +2,12 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http.Metadata;
@@ -34,7 +33,6 @@ namespace Microsoft.AspNetCore.Http
         private static readonly MethodInfo ResultWriteResponseAsyncMethod = typeof(RequestDelegateFactory).GetMethod(nameof(ExecuteResultWriteResponse), BindingFlags.NonPublic | BindingFlags.Static)!;
         private static readonly MethodInfo StringResultWriteResponseAsyncMethod = GetMethodInfo<Func<HttpResponse, string, Task>>((response, text) => HttpResponseWritingExtensions.WriteAsync(response, text, default));
         private static readonly MethodInfo JsonResultWriteResponseAsyncMethod = GetMethodInfo<Func<HttpResponse, object, Task>>((response, value) => HttpResponseJsonExtensions.WriteAsJsonAsync(response, value, default));
-        private static readonly MethodInfo EnumTryParseMethod = GetEnumTryParseMethod();
         private static readonly MethodInfo LogParameterBindingFailureMethod = GetMethodInfo<Action<HttpContext, string, string, string>>((httpContext, parameterType, parameterName, sourceValue) =>
             Log.ParameterBindingFailed(httpContext, parameterType, parameterName, sourceValue));
 
@@ -42,12 +40,13 @@ namespace Microsoft.AspNetCore.Http
         private static readonly ParameterExpression HttpContextExpr = Expression.Parameter(typeof(HttpContext), "httpContext");
         private static readonly ParameterExpression BodyValueExpr = Expression.Parameter(typeof(object), "bodyValue");
         private static readonly ParameterExpression WasTryParseFailureExpr = Expression.Variable(typeof(bool), "wasTryParseFailure");
-        private static readonly ParameterExpression TempSourceStringExpr = Expression.Variable(typeof(string), "tempSourceString");
+        private static readonly ParameterExpression TempSourceStringExpr = TryParseMethodCache.TempSourceStringExpr;
 
         private static readonly MemberExpression RequestServicesExpr = Expression.Property(HttpContextExpr, nameof(HttpContext.RequestServices));
         private static readonly MemberExpression HttpRequestExpr = Expression.Property(HttpContextExpr, nameof(HttpContext.Request));
         private static readonly MemberExpression HttpResponseExpr = Expression.Property(HttpContextExpr, nameof(HttpContext.Response));
         private static readonly MemberExpression RequestAbortedExpr = Expression.Property(HttpContextExpr, nameof(HttpContext.RequestAborted));
+        private static readonly MemberExpression UserExpr = Expression.Property(HttpContextExpr, nameof(HttpContext.User));
         private static readonly MemberExpression RouteValuesExpr = Expression.Property(HttpRequestExpr, nameof(HttpRequest.RouteValues));
         private static readonly MemberExpression QueryExpr = Expression.Property(HttpRequestExpr, nameof(HttpRequest.Query));
         private static readonly MemberExpression HeadersExpr = Expression.Property(HttpRequestExpr, nameof(HttpRequest.Headers));
@@ -55,8 +54,6 @@ namespace Microsoft.AspNetCore.Http
         private static readonly MemberExpression CompletedTaskExpr = Expression.Property(null, (PropertyInfo)GetMemberInfo<Func<Task>>(() => Task.CompletedTask));
 
         private static readonly BinaryExpression TempSourceStringNotNullExpr = Expression.NotEqual(TempSourceStringExpr, Expression.Constant(null));
-
-        private static readonly ConcurrentDictionary<Type, MethodInfo?> TryParseMethodCache = new();
 
         /// <summary>
         /// Creates a <see cref="RequestDelegate"/> implementation for <paramref name="action"/>.
@@ -159,7 +156,7 @@ namespace Microsoft.AspNetCore.Http
 
             var factoryContext = new FactoryContext()
             {
-                ServiceProvider = serviceProvider
+                ServiceProviderIsService = serviceProvider?.GetService<IServiceProviderIsService>()
             };
 
             var arguments = CreateArguments(methodInfo.GetParameters(), factoryContext);
@@ -197,7 +194,7 @@ namespace Microsoft.AspNetCore.Http
         {
             if (parameter.Name is null)
             {
-                throw new InvalidOperationException("A parameter does not have a name! Was it genererated? All parameters must be named.");
+                throw new InvalidOperationException("A parameter does not have a name! Was it generated? All parameters must be named.");
             }
 
             var parameterCustomAttributes = parameter.GetCustomAttributes();
@@ -226,21 +223,29 @@ namespace Microsoft.AspNetCore.Http
             {
                 return HttpContextExpr;
             }
+            else if (parameter.ParameterType == typeof(HttpRequest))
+            {
+                return HttpRequestExpr;
+            }
+            else if (parameter.ParameterType == typeof(HttpResponse))
+            {
+                return HttpResponseExpr;
+            }
+            else if (parameter.ParameterType == typeof(ClaimsPrincipal))
+            {
+                return UserExpr;
+            }
             else if (parameter.ParameterType == typeof(CancellationToken))
             {
                 return RequestAbortedExpr;
             }
-            else if (parameter.ParameterType == typeof(string) || HasTryParseMethod(parameter))
+            else if (parameter.ParameterType == typeof(string) || TryParseMethodCache.HasTryParseMethod(parameter))
             {
                 return BindParameterFromRouteValueOrQueryString(parameter, parameter.Name, factoryContext);
             }
-            else if (parameter.ParameterType.IsInterface)
-            {
-                return Expression.Call(GetRequiredServiceMethod.MakeGenericMethod(parameter.ParameterType), RequestServicesExpr);
-            }
             else
             {
-                if (factoryContext.ServiceProvider?.GetService<IServiceProviderIsService>() is IServiceProviderIsService serviceProviderIsService)
+                if (factoryContext.ServiceProviderIsService is IServiceProviderIsService serviceProviderIsService)
                 {
                     // If the parameter resolves as a service then get it from services
                     if (serviceProviderIsService.IsService(parameter.ParameterType))
@@ -477,72 +482,6 @@ namespace Microsoft.AspNetCore.Http
             };
         }
 
-        private static MethodInfo GetEnumTryParseMethod()
-        {
-            var staticEnumMethods = typeof(Enum).GetMethods(BindingFlags.Public | BindingFlags.Static);
-
-            foreach (var method in staticEnumMethods)
-            {
-                if (!method.IsGenericMethod || method.Name != "TryParse" || method.ReturnType != typeof(bool))
-                {
-                    continue;
-                }
-
-                var tryParseParameters = method.GetParameters();
-
-                if (tryParseParameters.Length == 2 &&
-                    tryParseParameters[0].ParameterType == typeof(string) &&
-                    tryParseParameters[1].IsOut)
-                {
-                    return method;
-                }
-            }
-
-            throw new Exception("static bool System.Enum.TryParse<TEnum>(string? value, out TEnum result) does not exist!!?!?");
-        }
-
-        // TODO: Use InvariantCulture where possible? Or is CurrentCulture fine because it's more flexible?
-        private static MethodInfo? FindTryParseMethod(Type type)
-        {
-            static MethodInfo? Finder(Type type)
-            {
-                if (type.IsEnum)
-                {
-                    return EnumTryParseMethod.MakeGenericMethod(type);
-                }
-
-                var staticMethods = type.GetMethods(BindingFlags.Public | BindingFlags.Static);
-
-                foreach (var method in staticMethods)
-                {
-                    if (method.Name != "TryParse" || method.ReturnType != typeof(bool))
-                    {
-                        continue;
-                    }
-
-                    var tryParseParameters = method.GetParameters();
-
-                    if (tryParseParameters.Length == 2 &&
-                        tryParseParameters[0].ParameterType == typeof(string) &&
-                        tryParseParameters[1].IsOut &&
-                        tryParseParameters[1].ParameterType == type.MakeByRefType())
-                    {
-                        return method;
-                    }
-                }
-
-                return null;
-            }
-
-            return TryParseMethodCache.GetOrAdd(type, Finder);
-        }
-
-        private static bool HasTryParseMethod(ParameterInfo parameter)
-        {
-            var nonNullableParameterType = Nullable.GetUnderlyingType(parameter.ParameterType) ?? parameter.ParameterType;
-            return FindTryParseMethod(nonNullableParameterType) is not null;
-        }
-
         private static Expression GetValueFromProperty(Expression sourceExpression, string key)
         {
             var itemProperty = sourceExpression.Type.GetProperty("Item");
@@ -574,9 +513,9 @@ namespace Microsoft.AspNetCore.Http
             var isNotNullable = underlyingNullableType is null;
 
             var nonNullableParameterType = underlyingNullableType ?? parameter.ParameterType;
-            var tryParseMethod = FindTryParseMethod(nonNullableParameterType);
+            var tryParseMethodCall = TryParseMethodCache.FindTryParseMethod(nonNullableParameterType);
 
-            if (tryParseMethod is null)
+            if (tryParseMethodCall is null)
             {
                 throw new InvalidOperationException($"No public static bool {parameter.ParameterType.Name}.TryParse(string, out {parameter.ParameterType.Name}) method found for {parameter.Name}.");
             }
@@ -631,7 +570,7 @@ namespace Microsoft.AspNetCore.Http
                 Expression.Call(LogParameterBindingFailureMethod,
                     HttpContextExpr, parameterTypeNameConstant, parameterNameConstant, TempSourceStringExpr));
 
-            var tryParseCall = Expression.Call(tryParseMethod, TempSourceStringExpr, parsedValue);
+            var tryParseCall = tryParseMethodCall(parsedValue);
 
             // If the parameter is nullable, we need to assign the "parsedValue" local to the nullable parameter on success.
             Expression tryParseExpression = isNotNullable ?
@@ -803,7 +742,7 @@ namespace Microsoft.AspNetCore.Http
         {
             public Type? JsonRequestBodyType { get; set; }
             public bool AllowEmptyRequestBody { get; set; }
-            public IServiceProvider? ServiceProvider { get; init; }
+            public IServiceProviderIsService? ServiceProviderIsService { get; init; }
 
             public bool UsingTempSourceString { get; set; }
             public List<(ParameterExpression, Expression)> TryParseParams { get; } = new();

@@ -338,7 +338,7 @@ namespace Microsoft.AspNetCore.Mvc.ApiExplorer
             };
         }
 
-        private IEnumerable<string?> GetHttpMethods(ControllerActionDescriptor action)
+        private static IEnumerable<string?> GetHttpMethods(ControllerActionDescriptor action)
         {
             if (action.ActionConstraints != null && action.ActionConstraints.Count > 0)
             {
@@ -350,7 +350,7 @@ namespace Microsoft.AspNetCore.Mvc.ApiExplorer
             }
         }
 
-        private RouteTemplate? ParseTemplate(ControllerActionDescriptor action)
+        private static RouteTemplate? ParseTemplate(ControllerActionDescriptor action)
         {
             if (action.AttributeRouteInfo?.Template != null)
             {
@@ -429,7 +429,7 @@ namespace Microsoft.AspNetCore.Mvc.ApiExplorer
             return results;
         }
 
-        private static MediaTypeCollection GetDeclaredContentTypes(IApiRequestMetadataProvider[]? requestMetadataAttributes)
+        internal static MediaTypeCollection GetDeclaredContentTypes(IReadOnlyList<IApiRequestMetadataProvider>? requestMetadataAttributes)
         {
             // Walk through all 'filter' attributes in order, and allow each one to see or override
             // the results of the previous ones. This is similar to the execution path for content-negotiation.
@@ -445,7 +445,7 @@ namespace Microsoft.AspNetCore.Mvc.ApiExplorer
             return contentTypes;
         }
 
-        private IApiRequestMetadataProvider[]? GetRequestMetadataAttributes(ControllerActionDescriptor action)
+        private static IApiRequestMetadataProvider[]? GetRequestMetadataAttributes(ControllerActionDescriptor action)
         {
             if (action.FilterDescriptors == null)
             {

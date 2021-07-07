@@ -123,7 +123,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
         [InlineData(nameof(Http3FrameType.Data))]
         [InlineData(nameof(Http3FrameType.Headers))]
         [InlineData(nameof(Http3FrameType.PushPromise))]
-        public async Task ControlStream_UnexpectedFrameType_ConnectionError(string frameType)
+        public async Task ControlStream_ClientToServer_UnexpectedFrameType_ConnectionError(string frameType)
         {
             await InitializeConnectionAsync(_noopApplication);
 
@@ -141,7 +141,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
         }
 
         [Fact]
-        public async Task ControlStream_ClientCloses_ConnectionError()
+        public async Task ControlStream_ClientToServer_ClientCloses_ConnectionError()
         {
             await InitializeConnectionAsync(_noopApplication);
 
@@ -155,6 +155,54 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
                 expectedLastStreamId: 0,
                 expectedErrorCode: Http3ErrorCode.ClosedCriticalStream,
                 expectedErrorMessage: CoreStrings.Http3ErrorControlStreamClientClosedInbound);
+        }
+
+        [Fact]
+        public async Task ControlStream_ServerToClient_ErrorInitializing_ConnectionError()
+        {
+            OnCreateServerControlStream = () =>
+            {
+                var controlStream = new Http3ControlStream(this, StreamInitiator.Server);
+
+                // Make server connection error when trying to write to control stream.
+                controlStream.StreamContext.Transport.Output.Complete();
+
+                return controlStream;
+            };
+
+            await InitializeConnectionAsync(_noopApplication);
+
+            AssertConnectionError<Http3ConnectionErrorException>(
+                expectedErrorCode: Http3ErrorCode.ClosedCriticalStream,
+                expectedErrorMessage: CoreStrings.Http3ControlStreamErrorInitializingOutbound);
+        }
+
+        [Fact]
+        public async Task SETTINGS_MaxFieldSectionSizeSent_ServerReceivesValue()
+        {
+            await InitializeConnectionAsync(_echoApplication);
+
+            var inboundControlStream = await GetInboundControlStream();
+            var incomingSettings = await inboundControlStream.ExpectSettingsAsync();
+
+            var defaultLimits = new KestrelServerLimits();
+            Assert.Collection(incomingSettings,
+                kvp =>
+                {
+                    Assert.Equal((long)Internal.Http3.Http3SettingType.MaxFieldSectionSize, kvp.Key);
+                    Assert.Equal(defaultLimits.MaxRequestHeadersTotalSize, kvp.Value);
+                });
+
+            var outboundcontrolStream = await CreateControlStream();
+            await outboundcontrolStream.SendSettingsAsync(new List<Http3PeerSetting>
+            {
+                new Http3PeerSetting(Internal.Http3.Http3SettingType.MaxFieldSectionSize, 100)
+            });
+
+            var maxFieldSetting = await ServerReceivedSettingsReader.ReadAsync().DefaultTimeout();
+
+            Assert.Equal(Internal.Http3.Http3SettingType.MaxFieldSectionSize, maxFieldSetting.Key);
+            Assert.Equal(100, maxFieldSetting.Value);
         }
     }
 }

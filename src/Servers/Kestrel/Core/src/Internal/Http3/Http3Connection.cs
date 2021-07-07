@@ -39,6 +39,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http3
         private int _activeRequestCount;
 
         private readonly Http3PeerSettings _serverSettings = new Http3PeerSettings();
+        private readonly Http3PeerSettings _clientSettings = new Http3PeerSettings();
         private readonly StreamCloseAwaitable _streamCompletionAwaitable = new StreamCloseAwaitable();
         private readonly IProtocolErrorCodeFeature _errorCodeFeature;
 
@@ -53,7 +54,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http3
             var httpLimits = context.ServiceContext.ServerOptions.Limits;
 
             _serverSettings.HeaderTableSize = (uint)httpLimits.Http3.HeaderTableSize;
-            _serverSettings.MaxRequestHeaderFieldSize = (uint)httpLimits.Http3.MaxRequestHeaderFieldSize;
+            _serverSettings.MaxRequestHeaderFieldSectionSize = (uint)httpLimits.MaxRequestHeadersTotalSize;
         }
 
         private void UpdateHighestStreamId(long streamId)
@@ -223,17 +224,25 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http3
             // the maximum capacity of the dynamic table to zero.
 
             // Don't create Encoder and Decoder as they aren't used now.
-            Exception? error = null;
 
-            // TODO should we await the control stream task?
-            var controlTask = CreateControlStream(application);
+            Exception? error = null;
+            ValueTask outboundControlStreamTask = default;
 
             try
             {
+                var outboundControlStream = await CreateNewUnidirectionalStreamAsync(application);
+                lock (_sync)
+                {
+                    OutboundControlStream = outboundControlStream;
+                }
+
+                // Don't delay on waiting to send outbound control stream settings.
+                outboundControlStreamTask = ProcessOutboundControlStreamAsync(outboundControlStream);
+
                 while (_isClosed == 0)
                 {
-                    // TODO implement way to unblock loop for one call to accept async to update state.
-                    // Use cts for now, update to custom awaitable or different solution in the future.
+                    // Don't pass a cancellation token to AcceptAsync.
+                    // AcceptAsync will return null if the connection is gracefully shutting down or aborted.
                     var streamContext = await _multiplexedContext.AcceptAsync();
                     try
                     {
@@ -242,10 +251,10 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http3
                             break;
                         }
 
-                        var quicStreamFeature = streamContext.Features.Get<IStreamDirectionFeature>();
+                        var streamDirectionFeature = streamContext.Features.Get<IStreamDirectionFeature>();
                         var streamIdFeature = streamContext.Features.Get<IStreamIdFeature>();
 
-                        Debug.Assert(quicStreamFeature != null);
+                        Debug.Assert(streamDirectionFeature != null);
                         Debug.Assert(streamIdFeature != null);
 
                         var httpConnectionContext = new Http3StreamContext(
@@ -260,12 +269,11 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http3
                             streamContext.Transport,
                             _streamLifetimeHandler,
                             streamContext,
+                            _clientSettings,
                             _serverSettings);
                         httpConnectionContext.TimeoutControl = _context.TimeoutControl;
 
-                        var streamId = streamIdFeature.StreamId;
-
-                        if (!quicStreamFeature.CanWrite)
+                        if (!streamDirectionFeature.CanWrite)
                         {
                             // Unidirectional stream
                             var stream = new Http3ControlStream<TContext>(application, httpConnectionContext);
@@ -276,7 +284,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http3
                         else
                         {
                             // Request stream
-                            UpdateHighestStreamId(streamId);
+                            UpdateHighestStreamId(streamIdFeature.StreamId);
 
                             var stream = new Http3Stream<TContext>(application, httpConnectionContext);
                             _streamLifetimeHandler.OnStreamCreated(stream);
@@ -340,17 +348,24 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http3
                         stream.Abort(connectionError, (Http3ErrorCode)_errorCodeFeature.Error);
                     }
 
+                    lock (_sync)
+                    {
+                        OutboundControlStream?.Abort(connectionError, (Http3ErrorCode)_errorCodeFeature.Error);
+                    }
+
                     while (_activeRequestCount > 0)
                     {
                         await _streamCompletionAwaitable;
                     }
+
+                    await outboundControlStreamTask;
 
                     _context.TimeoutControl.CancelTimeout();
                     _context.TimeoutControl.StartDrainTimeout(Limits.MinResponseDataRate, Limits.MaxResponseBufferSize);
                 }
                 catch
                 {
-                    Abort(connectionError, Http3ErrorCode.NoError);
+                    Abort(connectionError, Http3ErrorCode.InternalError);
                     throw;
                 }
             }
@@ -395,15 +410,23 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http3
             }
         }
 
-        private async ValueTask CreateControlStream<TContext>(IHttpApplication<TContext> application) where TContext : notnull
+        private async ValueTask ProcessOutboundControlStreamAsync(Http3ControlStream controlStream)
         {
-            var stream = await CreateNewUnidirectionalStreamAsync(application);
-            lock (_sync)
+            try
             {
-                OutboundControlStream = stream;
+                await controlStream.SendStreamIdAsync(id: 0);
+                await controlStream.SendSettingsFrameAsync();
             }
-            await stream.SendStreamIdAsync(id: 0);
-            await stream.SendSettingsFrameAsync();
+            catch (Exception ex)
+            {
+                Log.Http3OutboundControlStreamError(ConnectionId, ex);
+
+                var connectionError = new Http3ConnectionErrorException(CoreStrings.Http3ControlStreamErrorInitializingOutbound, Http3ErrorCode.ClosedCriticalStream);
+                Log.Http3ConnectionError(ConnectionId, connectionError);
+
+                // https://quicwg.org/base-drafts/draft-ietf-quic-http.html#section-6.2.1
+                Abort(new ConnectionAbortedException(connectionError.Message, connectionError), connectionError.ErrorCode);
+            }
         }
 
         private async ValueTask<Http3ControlStream> CreateNewUnidirectionalStreamAsync<TContext>(IHttpApplication<TContext> application) where TContext : notnull
@@ -423,21 +446,34 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http3
                 streamContext.Transport,
                 _streamLifetimeHandler,
                 streamContext,
+                _clientSettings,
                 _serverSettings);
             httpConnectionContext.TimeoutControl = _context.TimeoutControl;
 
             return new Http3ControlStream<TContext>(application, httpConnectionContext);
         }
 
-        private ValueTask<FlushResult> SendGoAway(long id)
+        private async ValueTask<FlushResult> SendGoAway(long id)
         {
+            Http3ControlStream? stream;
             lock (_sync)
             {
-                if (OutboundControlStream != null)
+                stream = OutboundControlStream;
+            }
+
+            if (stream != null)
+            {
+                try
                 {
-                    return OutboundControlStream.SendGoAway(id);
+                    return await stream.SendGoAway(id);
+                }
+                catch
+                {
+                    // The control stream may not be healthy.
+                    // Ignore error sending go away.
                 }
             }
+
             return default;
         }
 
@@ -522,6 +558,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http3
                 case Http3SettingType.QPackMaxTableCapacity:
                     break;
                 case Http3SettingType.MaxFieldSectionSize:
+                    _clientSettings.MaxRequestHeaderFieldSectionSize = (uint)value;
                     break;
                 case Http3SettingType.QPackBlockedStreams:
                     break;

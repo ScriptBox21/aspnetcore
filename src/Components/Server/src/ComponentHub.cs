@@ -2,7 +2,10 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
+using System.Buffers;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Components.Server.Circuits;
 using Microsoft.AspNetCore.DataProtection;
@@ -36,7 +39,7 @@ namespace Microsoft.AspNetCore.Components.Server
     // in error cases.
     internal sealed class ComponentHub : Hub
     {
-        private static readonly object CircuitKey = new object();
+        private static readonly object CircuitKey = new();
         private readonly IServerComponentDeserializer _serverComponentSerializer;
         private readonly IDataProtectionProvider _dataProtectionProvider;
         private readonly ICircuitFactory _circuitFactory;
@@ -220,11 +223,31 @@ namespace Microsoft.AspNetCore.Components.Server
                 return;
             }
 
-            await circuitHost.ReceiveByteArray(id, data);
+            _ = circuitHost.ReceiveByteArray(id, data);
         }
 
-        public async ValueTask DispatchBrowserEvent(string eventDescriptor, string eventArgs)
+        public async ValueTask<bool> ReceiveJSDataChunk(long streamId, long chunkId, byte[] chunk, string error)
         {
+            var circuitHost = await GetActiveCircuitAsync();
+            if (circuitHost == null)
+            {
+                return false;
+            }
+
+            // Note: this await will block the circuit. This is intentional.
+            // The call into the circuitHost.ReceiveJSDataChunk will block regardless as we call into Renderer.Dispatcher.InvokeAsync
+            // which ensures we're running on the main circuit thread so that the server/client remain in the same
+            // synchronization context. Additionally, we're utilizing the return value as a heartbeat for the transfer
+            // process, and without it would likely need to setup a separate endpoint to handle that functionality.
+            return await circuitHost.ReceiveJSDataChunk(streamId, chunkId, chunk, error);
+        }
+
+        public async ValueTask DispatchBrowserEvent(JsonElement eventInfo)
+        {
+            Debug.Assert(eventInfo.GetArrayLength() == 2, "Array length should be 2");
+            var eventDescriptor = eventInfo[0];
+            var eventArgs = eventInfo[1];
+
             var circuitHost = await GetActiveCircuitAsync();
             if (circuitHost == null)
             {
